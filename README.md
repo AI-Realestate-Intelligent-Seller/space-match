@@ -26,6 +26,15 @@ You can **watch browser reads live** inside the app, or in a real Chromium windo
   - API reference: https://space-match-uiiq.onrender.com/api/docs
 - On Render, set `BASE_URL=https://space-match-uiiq.onrender.com` so emailed links (invites, password resets) point there.
 - Postman: import `postman/SpaceMatch-Reels-API.postman_collection.json` with the **SpaceMatch Reels - Render** environment (its `baseUrl` is already set to the URL above).
+- **Vercel:** https://hub-spacematch.vercel.app. Vercel runs the app as serverless functions with a read-only disk,
+  so set these in Project Settings → Environment Variables (then redeploy):
+  - `DATABASE_URL`: Supabase *Session pooler* string (required; SQLite can't be used there).
+  - `SESSION_SECRET` and `TOKEN_ENCRYPTION_KEY`: required. When sharing a database with another deployment, use
+    the **same** `TOKEN_ENCRYPTION_KEY`, or stored tokens can't be decrypted.
+  - `BASE_URL` is optional: it defaults to the project's production URL.
+  - The refresh worker and daily schedule are **off** on Vercel (no background threads there); run them on one
+    other server or with `scripts/sync_all.py`. The Playwright browser reads (Facebook, TikTok, and the fallbacks)
+    need Chromium, which Vercel doesn't provide - Apify (Instagram) and the YouTube API work.
 
 ## Accounts and access (v0.5)
 
