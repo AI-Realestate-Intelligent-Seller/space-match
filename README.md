@@ -75,7 +75,7 @@ You can **watch browser reads live** inside the app, or in a real Chromium windo
   - The link works **once, for 1 hour**; requesting a new one cancels the previous link.
   - The new password **must differ from the current one** (422 otherwise).
   - After a reset, every other session for that account is logged out, and the browser that reset it is logged in.
-  - The answer is the same whether or not the email has an account, so the form can't be used to discover accounts. Requests are limited to 5 per 15 minutes per email and per IP.
+  - An email with no account gets 404 "No account found with this email address"; a broker who hasn't accepted their invite gets 409 (use the invite link). Requests are limited to 5 per 15 minutes per email and per IP.
   - Without SMTP settings, the reset email is printed to the server console.
   - API: `POST /api/auth/forgot-password` `{email}` · `GET /api/password-resets/{token}` · `POST /api/password-resets/{token}` `{password}`.
 - Invite emails go out over SMTP (`SMTP_*` in `.env`). Without SMTP, the invite is printed to the server console and the agent gets a copyable link.
