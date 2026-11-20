@@ -26,15 +26,40 @@ You can **watch browser reads live** inside the app, or in a real Chromium windo
   - API reference: https://space-match-uiiq.onrender.com/api/docs
 - On Render, set `BASE_URL=https://space-match-uiiq.onrender.com` so emailed links (invites, password resets) point there.
 - Postman: import `postman/SpaceMatch-Reels-API.postman_collection.json` with the **SpaceMatch Reels - Render** environment (its `baseUrl` is already set to the URL above).
-- **Vercel:** https://hub-spacematch.vercel.app. Vercel runs the app as serverless functions with a read-only disk,
-  so set these in Project Settings → Environment Variables (then redeploy):
-  - `DATABASE_URL`: Supabase *Session pooler* string (required; SQLite can't be used there).
-  - `SESSION_SECRET` and `TOKEN_ENCRYPTION_KEY`: required. When sharing a database with another deployment, use
-    the **same** `TOKEN_ENCRYPTION_KEY`, or stored tokens can't be decrypted.
-  - `BASE_URL` is optional: it defaults to the project's production URL.
-  - The refresh worker and daily schedule are **off** on Vercel (no background threads there); run them on one
-    other server or with `scripts/sync_all.py`. The Playwright browser reads (Facebook, TikTok, and the fallbacks)
-    need Chromium, which Vercel doesn't provide - Apify (Instagram) and the YouTube API work.
+
+### Vercel
+
+- **Live (Vercel):** https://hub-spacematch.vercel.app
+  - Dashboard: https://hub-spacematch.vercel.app/login
+  - Hub API: `https://hub-spacematch.vercel.app/v1` (health check: `/v1/health`)
+  - API reference: https://hub-spacematch.vercel.app/api/docs
+- Deploys automatically from GitHub on every push to `main`. Vercel detects FastAPI and serves `app/main.py`
+  as a serverless function - no `vercel.json` needed.
+- **Dependencies come from `pyproject.toml`**, not `requirements.txt`: Vercel reads `pyproject.toml` first.
+  Add every new package to **both** files (the Dockerfile uses `requirements.txt`);
+  `tests/test_vercel.py` fails if they differ.
+- **Environment variables** (Project Settings → Environment Variables; redeploy after any change):
+
+  | Variable | |
+  |---|---|
+  | `DATABASE_URL` | Required. Supabase *Session pooler* string. The disk is read-only and temporary, so SQLite can't be used. |
+  | `SESSION_SECRET` | Required. A long random string. |
+  | `TOKEN_ENCRYPTION_KEY` | Required. When sharing the database with another deployment (Render), use the **same** key, or stored tokens can't be decrypted. |
+  | `BASE_URL` | Optional. Defaults to the project's production URL. |
+  | `SMTP_*`, `APIFY_TOKEN`, `YOUTUBE_API_KEY` | As in `.env.example`. |
+
+- **What differs from Render:**
+  - The refresh worker and daily schedule are **off** (serverless functions can't run background threads).
+    Run them on one other server, or schedule `scripts/sync_all.py`.
+  - The Playwright browser reads (Facebook, TikTok, and the Instagram/YouTube fallbacks) need Chromium, which
+    Vercel doesn't provide. Instagram through Apify and YouTube through the Data API work.
+- **Troubleshooting** (Vercel → Project → Logs):
+
+  | Error | Cause and fix |
+  |---|---|
+  | Every page shows `FUNCTION_INVOCATION_FAILED` | The app crashed on start-up - the log has the real error. |
+  | `ModuleNotFoundError: No module named 'fastapi'` | `pyproject.toml` has no `dependencies` list, so Vercel installed nothing. List the packages there. |
+  | `Set DATABASE_URL ...` / `Set SESSION_SECRET ...` | That environment variable is missing. Add it and redeploy. |
 
 ## Accounts and access (v0.5)
 
