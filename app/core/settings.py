@@ -64,6 +64,7 @@ SMTP_USER = os.getenv("SMTP_USER") or os.getenv("SMTP_USERNAME", "")          # 
 SMTP_PASSWORD = os.getenv("SMTP_PASSWORD", "")
 SMTP_FROM = os.getenv("SMTP_FROM") or os.getenv("EMAIL_FROM") or SMTP_USER or "no-reply@localhost"
 SMTP_SECURITY = os.getenv("SMTP_SECURITY", "starttls").lower()  # starttls | ssl | none
+SMTP_TIMEOUT_S = int(os.getenv("SMTP_TIMEOUT_S", "10"))
 
 
 

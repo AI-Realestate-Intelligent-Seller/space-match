@@ -20,11 +20,11 @@ You can **watch browser reads live** inside the app, or in a real Chromium windo
 
 ## Deployment
 
-- **Live (Render):** https://space-match-zxji.onrender.com
-  - Dashboard: https://space-match-zxji.onrender.com/login
-  - Hub API: `https://space-match-zxji.onrender.com/v1` (health check: `/v1/health`)
-  - API reference: https://space-match-zxji.onrender.com/api/docs
-- On Render, set `BASE_URL=https://space-match-zxji.onrender.com` so emailed links (invites, password resets) point there.
+- **Live (Render):** https://space-match-uiiq.onrender.com
+  - Dashboard: https://space-match-uiiq.onrender.com/login
+  - Hub API: `https://space-match-uiiq.onrender.com/v1` (health check: `/v1/health`)
+  - API reference: https://space-match-uiiq.onrender.com/api/docs
+- On Render, set `BASE_URL=https://space-match-uiiq.onrender.com` so emailed links (invites, password resets) point there.
 - Postman: import `postman/SpaceMatch-Reels-API.postman_collection.json` with the **SpaceMatch Reels - Render** environment (its `baseUrl` is already set to the URL above).
 
 ## Accounts and access (v0.5)
