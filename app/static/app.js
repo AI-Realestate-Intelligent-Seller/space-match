@@ -35,7 +35,10 @@ async function api(url, options = {}) {
   if (!response.ok) {
     let detail = json.detail || `HTTP ${response.status}`;
     if (Array.isArray(detail)) detail = detail.map(d => `${d.loc?.slice(-1)[0] || 'field'}: ${d.msg}`).join('; ');
-    throw new Error(String(detail));
+    const error = new Error(String(detail));
+    error.status = response.status;
+    error.failedAttempts = Number(response.headers.get('X-Failed-Attempts')) || 0;  // login only
+    throw error;
   }
   return json;
 }
@@ -56,12 +59,14 @@ const routes = [
   { pattern: /^\/login$/, view: viewLogin, guest: true, title: 'Log in' },
   { pattern: /^\/signup$/, view: viewSignup, guest: true, title: 'Create account' },
   { pattern: /^\/forgot-password$/, view: viewForgotPassword, guest: true, title: 'Forgot password' },
+  { pattern: /^\/recover$/, view: viewRecover, guest: true, title: 'Recover account' },
   { pattern: /^\/reset-password\/([\w-]+)$/, view: viewResetPassword, guest: true, title: 'Reset password' },
   { pattern: /^\/invite\/([\w-]+)$/, view: viewInvite, guest: true, title: 'Accept invite' },
   { pattern: /^\/properties$/, view: viewProperties, auth: true, title: 'Properties', nav: 'properties' },
   { pattern: /^\/properties\/([\w-]+)$/, view: viewProperty, auth: true, title: 'Property', nav: 'properties' },
   { pattern: /^\/brokers$/, view: viewBrokers, auth: true, agent: true, title: 'Brokers', nav: 'brokers' },
   { pattern: /^\/api-keys$/, view: viewApiKeys, auth: true, agent: true, title: 'API keys', nav: 'api-keys' },
+  { pattern: /^\/account$/, view: viewAccount, auth: true, title: 'Account', nav: 'account' },
 ];
 let renderToken = 0;
 
@@ -175,13 +180,22 @@ function viewLogin(root) {
       <a class="forgot-link" href="/forgot-password" data-link>Forgot password?</a>
       <button class="primary" type="submit">Log in</button>
     </form>
-    <small class="muted">New agent? <a href="/signup" data-link>Create an account</a>.<br>Brokers: use the invite link from your email.</small>`;
+    <div id="recover-help" class="notice hidden" role="alert">Having trouble logging in? If you can't get into your email, <a id="recover-help-link" href="/recover" data-link>recover your account</a> with your recovery email. Or <a href="/forgot-password" data-link>reset your password</a>.</div>
+    <small class="muted">New agent? <a href="/signup" data-link>Create an account</a>.<br></small>`;
   $('#login-form').addEventListener('submit', e => {
     e.preventDefault();
     busy(e.submitter, async () => {
-      const r = await post('/api/auth/login', formData(e.target));
-      setUser(r.user, r.csrf);
-      navigate(nextPath(), true);
+      try {
+        const r = await post('/api/auth/login', formData(e.target));
+        setUser(r.user, r.csrf);
+        navigate(nextPath(), true);
+      } catch (err) {
+        if (err.failedAttempts >= 5) {  // offer recovery after 5 failed attempts for this email
+          $('#recover-help-link').setAttribute('href', '/recover?email=' + enc($('#login-email').value.trim()));
+          $('#recover-help').classList.remove('hidden');
+        }
+        throw err;
+      }
     });
   });
 }
@@ -215,7 +229,7 @@ function viewForgotPassword(root) {
       <label for="fp-email">Email</label><input id="fp-email" name="email" type="email" autocomplete="email" required>
       <button class="primary" type="submit">Send reset link</button>
     </form>
-    <small class="muted"><a href="/login" data-link>Back to log in</a></small>`;
+    <small class="muted">Can't access this email? <a href="/recover" data-link>Recover your account</a> with your recovery email.<br><a href="/login" data-link>Back to log in</a></small>`;
   $('#forgot-form').addEventListener('submit', e => {
     e.preventDefault();
     busy(e.submitter, async () => {
@@ -253,6 +267,136 @@ async function viewResetPassword(root, token, current) {
       navigate('/properties', true);
     });
   });
+}
+
+/* ------------------------------------------------------- account recovery -- */
+
+const codeInput = (id, label = '6-digit code') =>
+  `<input id="${id}" name="code" inputmode="numeric" autocomplete="one-time-code" pattern="\\d{6}" maxlength="6" required placeholder="123456" aria-label="${esc(label)}">`;
+
+/** Disable `button` for `seconds`, showing a countdown, so codes can't be re-requested too fast. */
+let codeSentAt = 0;
+const sinceCode = () => Math.max(0, 60 - Math.floor((Date.now() - codeSentAt) / 1000));
+
+function cooldown(button, seconds = 60) {
+  const label = button.dataset.idle || (button.dataset.idle = button.textContent);
+  let left = seconds;
+  button.disabled = true;
+  const tick = () => {
+    if (!button.isConnected) return;
+    if (left <= 0) { button.disabled = false; button.textContent = label; return; }
+    button.textContent = `${label} (${left--}s)`;
+    setTimeout(tick, 1000);
+  };
+  tick();
+}
+
+/** Logged out: login email + recovery email -> code -> new password -> (optionally) a new login email. */
+function viewRecover(root) {
+  let request = { email: new URLSearchParams(location.search).get('email') || '', recovery_email: '' };
+
+  const start = () => {
+    root.innerHTML = `${brand}<h1>Recover account</h1>
+      <p class="muted">Can't get into your login email? Enter it together with the recovery email you verified on your Account page. We'll send a 6-digit code to the recovery email.</p>
+      <form id="rc-form">
+        <label for="rc-email">Login email</label><input id="rc-email" name="email" type="email" autocomplete="username" required value="${esc(request.email)}">
+        <label for="rc-backup">Recovery email</label><input id="rc-backup" name="recovery_email" type="email" autocomplete="email" required value="${esc(request.recovery_email)}">
+        <button class="primary" type="submit">Send code</button>
+      </form>
+      <small class="muted">No recovery email set up? <a href="/forgot-password" data-link>Reset your password by email</a> instead.<br><a href="/login" data-link>Back to log in</a></small>`;
+    $(request.email ? '#rc-backup' : '#rc-email').focus();
+    $('#rc-form').addEventListener('submit', e => {
+      e.preventDefault();
+      request = { email: $('#rc-email').value.trim(), recovery_email: $('#rc-backup').value.trim() };
+      busy(e.submitter, async () => { const r = await post('/api/auth/recover', request); codeSentAt = Date.now(); enterCode(r.message); });
+    });
+  };
+
+  const enterCode = message => {
+    root.innerHTML = `${brand}<h1>Enter your code</h1><p class="muted">${esc(message)}</p>
+      <form id="rc-code-form">
+        <label for="rc-code">6-digit code</label>${codeInput('rc-code')}
+        <button class="primary" type="submit">Continue</button>
+      </form>
+      <div class="report-actions"><button type="button" class="secondary small" id="rc-resend">Send a new code</button><button type="button" class="secondary small" id="rc-restart">Start again</button></div>`;
+    $('#rc-code').focus();
+    cooldown($('#rc-resend'), sinceCode());
+    $('#rc-resend').addEventListener('click', e => {
+      const btn = e.currentTarget;
+      busy(btn, async () => { await post('/api/auth/recover', request); codeSentAt = Date.now(); toast('If the details match, a new code is on its way'); }).then(() => cooldown(btn, sinceCode()));
+    });
+    $('#rc-restart').addEventListener('click', start);
+    $('#rc-code-form').addEventListener('submit', e => {
+      e.preventDefault();
+      busy(e.submitter, async () => { await post('/api/auth/recover/verify', { email: request.email, code: $('#rc-code').value.trim() }); newPassword(); });
+    });
+  };
+
+  const newPassword = () => {
+    root.innerHTML = `${brand}<h1>Choose a new password</h1><p class="muted">Code accepted. Set a new password for <b>${esc(request.email)}</b> - you have 15 minutes. Other devices will be logged out.</p>
+      <form id="rc-pw-form">
+        <label for="rc-password">New password</label><input id="rc-password" name="password" type="password" autocomplete="new-password" required minlength="8" maxlength="128">
+        <label for="rc-confirm">Confirm new password</label><input id="rc-confirm" name="confirm" type="password" autocomplete="new-password" required minlength="8">
+        <button class="primary" type="submit">Set password &amp; log in</button>
+      </form>`;
+    addPasswordToggles(root);
+    $('#rc-password').focus();
+    $('#rc-pw-form').addEventListener('submit', e => {
+      e.preventDefault();
+      const data = formData(e.target);
+      if (data.password !== data.confirm) return toast('Passwords do not match', true);
+      busy(e.submitter, async () => {
+        const r = await post('/api/auth/recover/password', { password: data.password });
+        setUser(r.user, r.csrf);
+        loginEmailQuestion(data.password);
+      });
+    });
+  };
+
+  // Logged in now. Most people recover because the login mailbox is gone, so offer to replace it.
+  const loginEmailQuestion = password => {
+    root.innerHTML = `${brand}<h1>You're back in</h1>
+      <p class="muted">Your password was changed and other devices were logged out. Can you still get into <b>${esc(state.user.email)}</b>? If not, switch your login email to one you can use.</p>
+      <div class="report-actions"><button class="primary" id="rc-done">Yes, go to dashboard</button><button class="secondary" id="rc-change">No, change my login email</button></div>`;
+    $('#rc-done').addEventListener('click', () => navigate('/properties', true));
+    $('#rc-change').addEventListener('click', () => newLoginEmail(password));
+  };
+
+  const newLoginEmail = password => {
+    root.innerHTML = `${brand}<h1>New login email</h1><p class="muted">We'll send a code to the new address to confirm it.</p>
+      <form id="rc-new-email">
+        <label for="rc-new">New login email</label><input id="rc-new" type="email" autocomplete="email" required>
+        <button class="primary" type="submit">Send code</button>
+      </form>
+      <small class="muted"><a href="/properties" data-link>Skip for now</a> - you can do this later on the Account page.</small>`;
+    $('#rc-new').focus();
+    $('#rc-new-email').addEventListener('submit', e => {
+      e.preventDefault();
+      const email = $('#rc-new').value.trim();
+      busy(e.submitter, async () => { await post('/api/account/email', { email, password }); codeSentAt = Date.now(); confirmLoginEmail(email); });
+    });
+  };
+
+  const confirmLoginEmail = email => {
+    root.innerHTML = `${brand}<h1>Confirm new email</h1><p class="muted">We sent a 6-digit code to <b>${esc(email)}</b>. It expires in 10 minutes.</p>
+      <form id="rc-new-code">
+        <label for="rc-new-code-input">6-digit code</label>${codeInput('rc-new-code-input')}
+        <button class="primary" type="submit">Confirm</button>
+      </form>
+      <small class="muted"><a href="/account" data-link>Finish later on the Account page</a></small>`;
+    $('#rc-new-code-input').focus();
+    $('#rc-new-code').addEventListener('submit', e => {
+      e.preventDefault();
+      busy(e.submitter, async () => {
+        const r = await post('/api/account/email/verify', { code: $('#rc-new-code-input').value.trim() });
+        setUser(r.user);
+        toast('Login email updated');
+        navigate('/properties', true);
+      });
+    });
+  };
+
+  start();
 }
 
 async function viewInvite(root, token, current) {
@@ -577,6 +721,93 @@ function brokerRow(b) {
       <td class="narrow"><button class="secondary small danger" data-remove="${esc(b.id)}" data-property="${esc(p.property_id)}" data-address="${esc(p.address)}">Remove</button></td>
     </tr>`).join('')}</tbody></table>
   </article>`;
+}
+
+/* ------------------------------------------------------------------ account -- */
+
+async function viewAccount(root, current) {
+  setCrumbs(['Account']);
+  const account = await api('/api/account');
+  if (!current()) return;
+  renderAccount(root, account);
+}
+
+/** A sent-code box: enter the code, resend it, or cancel. `kind` is 'recovery-email' or 'email'. */
+const pendingCode = (kind, email) => `<div class="pending-box">
+    <p>We sent a 6-digit code to <b>${esc(email)}</b>. It expires in 10 minutes.</p>
+    <form class="inline-form" data-verify="${kind}">${codeInput(`code-${kind}`)}<button class="primary" type="submit">Verify</button></form>
+    <div class="report-actions"><button class="secondary small" data-code-resend="${kind}">Resend code</button><button class="secondary small" data-code-cancel="${kind}">Cancel</button></div>
+  </div>`;
+
+const emailPasswordForm = (id, emailLabel, button, placeholder = '') => `<form class="account-form" id="${id}">
+    <label>${esc(emailLabel)}<input name="email" type="email" required autocomplete="off" placeholder="${esc(placeholder)}"></label>
+    <label>Current password<input name="password" type="password" required autocomplete="current-password"></label>
+    <button class="primary" type="submit">${esc(button)}</button>
+  </form>`;
+
+function renderAccount(root, a) {
+  const rerender = next => renderAccount(root, next);
+  const verified = !!a.recovery_email;
+  root.innerHTML = `
+    <section class="section page-head"><div><h2>Account</h2><p class="subtle">Your login details, and how to get back in if you lose access to your email.</p></div></section>
+    <section class="section">
+      <div class="account-card">
+        <div class="account-card-head"><h3>Login</h3>${a.pending_login_email ? '' : '<button class="secondary small" id="show-change-email">Change login email</button>'}</div>
+        <dl class="account-facts"><dt>Name</dt><dd>${esc(a.name)}</dd><dt>Role</dt><dd>${a.role === 'agent' ? 'Agent' : 'Broker'}</dd><dt>Login email</dt><dd>${esc(a.email)}</dd></dl>
+        ${a.pending_login_email ? pendingCode('email', a.pending_login_email)
+          : `<div id="change-email-box" class="hidden">${emailPasswordForm('change-email-form', 'New login email', 'Send code')}</div>`}
+      </div>
+    </section>
+    <section class="section bottom-section">
+      <div class="account-card">
+        <div class="account-card-head"><h3>Recovery email</h3>${verified ? '<span class="tag tag-green">VERIFIED</span>' : '<span class="tag tag-amber">NOT SET</span>'}</div>
+        <p class="subtle">If you lose access to <b>${esc(a.email)}</b>, you can recover your account through this address. Use one you'll keep, like a personal email.</p>
+        ${verified ? `<dl class="account-facts"><dt>Recovery email</dt><dd>${esc(a.recovery_email)}</dd></dl>
+          <div class="report-actions"><button class="secondary small" id="show-change-recovery">Change</button><button class="secondary small danger" id="show-remove-recovery">Remove</button></div>
+          <form class="account-form hidden" id="remove-recovery-form"><label>Current password<input name="password" type="password" required autocomplete="current-password"></label><button class="primary danger-fill" type="submit">Remove recovery email</button></form>` : ''}
+        ${a.pending_recovery_email ? pendingCode('recovery-email', a.pending_recovery_email)
+          : `<div id="recovery-form-box" class="${verified ? 'hidden' : ''}">${emailPasswordForm('recovery-form', verified ? 'New recovery email' : 'Recovery email', 'Send code', 'e.g. your personal email')}</div>`}
+      </div>
+    </section>`;
+  addPasswordToggles(root);
+
+  const toggle = (button, box) => $(button, root)?.addEventListener('click', () => { $(box, root).classList.toggle('hidden'); $(`${box} input`, root)?.focus(); });
+  toggle('#show-change-email', '#change-email-box');
+  toggle('#show-change-recovery', '#recovery-form-box');
+  toggle('#show-remove-recovery', '#remove-recovery-form');
+
+  $('#recovery-form', root)?.addEventListener('submit', e => {
+    e.preventDefault();
+    busy(e.submitter, async () => {
+      const r = await post('/api/account/recovery-email', formData(e.target));
+      codeSentAt = Date.now();
+      rerender(r);
+      toast(r.same_domain ? 'Code sent. Tip: an address at a different domain is safer if you leave your company.' : 'Code sent - check that inbox');
+    });
+  });
+  $('#change-email-form', root)?.addEventListener('submit', e => {
+    e.preventDefault();
+    busy(e.submitter, async () => { const r = await post('/api/account/email', formData(e.target)); codeSentAt = Date.now(); rerender(r); toast('Code sent to your new email'); });
+  });
+  $('#remove-recovery-form', root)?.addEventListener('submit', e => {
+    e.preventDefault();
+    busy(e.submitter, async () => { rerender(await post('/api/account/recovery-email/remove', formData(e.target))); toast('Recovery email removed'); });
+  });
+  $$('form[data-verify]', root).forEach(form => form.addEventListener('submit', e => {
+    e.preventDefault();
+    busy(e.submitter, async () => {
+      const r = await post(`/api/account/${form.dataset.verify}/verify`, { code: $('input', form).value.trim() });
+      if (r.user) setUser(r.user);
+      rerender(r);
+      toast(form.dataset.verify === 'email' ? 'Login email updated' : 'Recovery email verified');
+    });
+  }));
+  $$('[data-code-resend]', root).forEach(btn => {
+    cooldown(btn, sinceCode());
+    btn.addEventListener('click', () => busy(btn, async () => { await post(`/api/account/${btn.dataset.codeResend}/resend`); codeSentAt = Date.now(); toast('New code sent'); }).then(() => cooldown(btn, sinceCode())));
+  });
+  $$('[data-code-cancel]', root).forEach(btn => btn.addEventListener('click', () =>
+    busy(btn, async () => rerender(await post(`/api/account/${btn.dataset.codeCancel}/cancel`)))));
 }
 
 /* ----------------------------------------------------------------- API keys -- */

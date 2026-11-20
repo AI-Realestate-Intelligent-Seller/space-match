@@ -244,7 +244,8 @@ CREATE INDEX IF NOT EXISTS idx_snapshots ON metric_snapshots(reel_id,fetched_at 
 
 ALL_TABLES = ("properties", "accounts", "reels", "property_reels", "metric_snapshots", "oauth_states", "users",
               "property_brokers", "invites", "api_keys", "link_history", "refreshes", "read_logs",
-              "idempotency_keys", "app_state", "profile_scans", "password_resets")
+              "idempotency_keys", "app_state", "profile_scans", "password_resets", "email_codes",
+              "account_events")
 
 
 def _lock_down_data_api(c):
@@ -411,6 +412,23 @@ def _migrate_api_v1(c):
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
     CREATE INDEX IF NOT EXISTS idx_password_resets_user ON password_resets(user_id);
+    """)
+    # Account recovery: a verified recovery email, emailed 6-digit codes, and an audit trail.
+    _add_columns(c, "users", {"recovery_email": "TEXT", "recovery_email_verified_at": "TEXT"})
+    c.executescript("""
+    CREATE TABLE IF NOT EXISTS email_codes (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, purpose TEXT NOT NULL, email TEXT NOT NULL,
+      code_hash TEXT NOT NULL, attempts INTEGER NOT NULL DEFAULT 0, expires_at INTEGER NOT NULL,
+      sent_at INTEGER NOT NULL, used_at TEXT, created_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_email_codes_user ON email_codes(user_id, purpose, sent_at);
+    CREATE TABLE IF NOT EXISTS account_events (
+      id TEXT PRIMARY KEY, user_id TEXT NOT NULL, event TEXT NOT NULL, detail TEXT, ip TEXT,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_account_events_user ON account_events(user_id, created_at);
     """)
     # Refreshes interrupted by a restart: put them back in the queue.
     c.execute("UPDATE refreshes SET status='queued', started_at=NULL WHERE status='running'")

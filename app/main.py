@@ -32,6 +32,7 @@ from app.api import api_v1
 from app.api import apikeys
 from app.api import auth
 from app.api import brokers
+from app.api import recovery
 from app.sources import playwright_scraper
 from app.services import refresh as rf
 from app.services import scans
@@ -59,6 +60,7 @@ app.add_middleware(SessionMiddleware, secret_key=SESSION_SECRET,
 app.mount("/static", StaticFiles(directory=ROOT / "static"), name="static")
 app.include_router(auth.router)
 app.include_router(brokers.router)
+app.include_router(recovery.router)
 app.include_router(apikeys.router)
 app.include_router(api_v1.router)
 # app.include_router(api_v2.router)  # Instagram profile scan (/v2) - disabled for now
@@ -412,8 +414,8 @@ def export_property_reel_report(property_id: str, user: dict = Depends(current_u
 # The dashboard is a single page app; these paths all serve index.html and app.js
 # picks the view (and redirects to /login when needed).
 
-SPA_PATHS = ("/", "/login", "/signup", "/forgot-password", "/reset-password/{token}", "/invite/{token}", "/properties", "/properties/{property_id}", "/brokers",
-             "/api-keys")
+SPA_PATHS = ("/", "/login", "/signup", "/forgot-password", "/recover", "/reset-password/{token}", "/invite/{token}", "/properties", "/properties/{property_id}", "/brokers",
+             "/api-keys", "/account")
 STATIC_ASSETS = ("app.js", "style.css")
 
 

@@ -190,4 +190,16 @@ input[type="checkbox"]{height:16px;width:16px;min-width:16px;padding:0;margin:3p
 @media(max-width:750px){.scan-form{grid-template-columns:1fr}.scan-progress{grid-template-columns:1fr}}
 
 /* forgot password link on the login form */
-.forgot-link{justify-self:end;font-size:12px;font-weight:600;margin-top:-4px}
+.forgot-link{align-self:flex-end;font-size:12px;font-weight:600;margin-top:-4px}
+/* Account page + account recovery */
+.account-card{background:#fff;border:1px solid var(--line);border-radius:14px;padding:18px 20px;box-shadow:0 3px 16px #17395909;display:grid;gap:14px;max-width:760px}
+.account-card-head{display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap}
+.account-facts{display:grid;grid-template-columns:max-content 1fr;gap:6px 18px;margin:0}
+.account-facts dt{color:var(--muted);font-size:12px;font-weight:700}.account-facts dd{margin:0;font-weight:600;overflow-wrap:anywhere}
+.account-form{display:grid;grid-template-columns:1fr 1fr auto;gap:10px;align-items:end}
+.account-form label{display:grid;gap:5px;font-size:12px;font-weight:700;color:var(--muted)}.account-form input{width:100%}
+.pending-box{border:1px dashed var(--green);border-radius:10px;padding:12px 14px;display:grid;gap:10px;background:#f3faf8}
+.pending-box .inline-form{margin:0;max-width:360px}
+.notice{border:1px solid #f0d9a8;background:#fff8ea;border-radius:10px;padding:12px 14px;font-size:13px;margin:-8px 0 18px;line-height:1.55}
+.login-box .report-actions{flex-wrap:wrap}
+@media(max-width:750px){.account-form{grid-template-columns:1fr}.pending-box .inline-form{flex-direction:column}}

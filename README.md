@@ -47,7 +47,25 @@ You can **watch browser reads live** inside the app, or in a real Chromium windo
 - Invite emails go out over SMTP (`SMTP_*` in `.env`). Without SMTP, the invite is printed to the server console and the agent gets a copyable link.
 - Upgrading from v0.4: the **first agent who signs up** takes over the existing no-login data.
 - Upgrading from v0.7: users with the old `owner` role become `agent` automatically when the app starts (SQLite and Postgres).
-- Front-end routes: `/login`, `/signup`, `/forgot-password`, `/reset-password/:token`, `/invite/:token`, `/properties`, `/properties/:id`, `/brokers`, `/api-keys`.
+- **Recovery email (Account page, `/account`):** optional. Users add a second address they'll keep (e.g. a personal email)
+  and confirm it with a 6-digit code sent to it. Changing it needs the current password and a new code (the old one keeps
+  working until the new one is verified); removing it needs the current password. The login email can be changed the same way.
+- **Recover account (`/recover`):** for people who can't get into their login email. Offered on the login page after
+  5 failed attempts and always on the forgot-password page.
+  1. Login email + recovery email → a code is emailed to the recovery email **only** if they match a verified pair.
+     The answer is always the same, so nobody can discover an account's recovery email by guessing.
+  2. The code → a 15-minute recovery session in that browser.
+  3. A new password → every other session is logged out, alerts go to both addresses, and the user is logged in.
+     They're then asked whether they can still reach their login email, and can switch it to a new one.
+  - Codes: 6 digits, valid 10 minutes, 5 wrong tries, newest only, single use, stored as an HMAC.
+    One code a minute and 5 an hour per account; recovery requests and wrong codes are rate-limited per email / IP.
+  - Every change (recovery email added/changed/removed, login email changed, account recovered) emails an alert
+    and is written to the `account_events` table.
+  - API: `GET /api/account` · `POST /api/account/recovery-email` `{email, password}` · `POST /api/account/recovery-email/verify` `{code}` ·
+    `POST /api/account/recovery-email/remove` `{password}` · `POST /api/account/email` `{email, password}` · `POST /api/account/email/verify` `{code}` ·
+    `POST /api/account/{recovery-email|email}/resend|cancel` · `POST /api/auth/recover` `{email, recovery_email}` ·
+    `POST /api/auth/recover/verify` `{email, code}` · `POST /api/auth/recover/password` `{password}`.
+- Front-end routes: `/login`, `/signup`, `/forgot-password`, `/recover`, `/reset-password/:token`, `/invite/:token`, `/properties`, `/properties/:id`, `/brokers`, `/api-keys`, `/account`.
 - Code: `app/api/auth.py` (sessions, sign-up, login, password reset, invites), `app/api/access.py` (permission rules), `app/api/brokers.py` (broker management), `app/core/security.py`, `app/core/mailer.py`.
 
 ## Hub API (v0.6, `/v1`)
@@ -207,6 +225,7 @@ app/
   main.py            FastAPI app: dashboard API (/api), static files, startup
   api/               HTTP routers and request guards
     auth.py            sessions, sign-up, login, password reset
+    recovery.py        recovery email, login email change, account recovery
     access.py          permission rules (who can see which property/reel)
     brokers.py         broker management and invites
     apikeys.py         Hub API keys, scopes, rate limit

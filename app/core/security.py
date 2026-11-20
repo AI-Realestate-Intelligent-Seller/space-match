@@ -71,6 +71,10 @@ class RateLimiter:
         with self._lock:
             return any(len(self._trim(k)) >= self.limit for k in keys)
 
+    def count(self, key) -> int:
+        with self._lock:
+            return len(self._trim(key))
+
     def hit(self, *keys):
         with self._lock:
             for k in keys:

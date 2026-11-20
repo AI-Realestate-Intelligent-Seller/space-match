@@ -23,6 +23,7 @@ router = APIRouter(prefix="/api")
 login_limiter = RateLimiter(limit=10, window=15 * 60)
 reset_limiter = RateLimiter(limit=5, window=15 * 60)  # reset emails per email / IP
 RESET_TTL_S = 60 * 60  # a reset link works for 1 hour, once
+FAILED_ATTEMPTS_HEADER = "X-Failed-Attempts"
 
 EMAIL_RE = re.compile(r"^[^@\s]{1,64}@[^@\s]{1,190}\.[^@\s]{2,63}$")
 PUBLIC_USER_FIELDS = ("id", "email", "name", "role", "brokerage")
@@ -131,11 +132,14 @@ def login(body: LoginRequest, request: Request):
     ip = request.client.host if request.client else "unknown"
     keys = (f"email:{email}", f"ip:{ip}")
     if login_limiter.blocked(*keys):
-        raise HTTPException(429, "Too many failed attempts - try again in 15 minutes")
+        raise HTTPException(429, "Too many failed attempts - try again in 15 minutes",
+                            headers={FAILED_ATTEMPTS_HEADER: str(login_limiter.count(keys[0]))})
     user = get_one("SELECT * FROM users WHERE email=?", (email,))
     if not verify_password(body.password, (user or {}).get("password_hash") or DUMMY_HASH) or not user:
         login_limiter.hit(*keys)
-        raise HTTPException(401, "Incorrect email or password")
+        # Counted per email whether or not it has an account; the page offers "Recover account" after 5.
+        raise HTTPException(401, "Incorrect email or password",
+                            headers={FAILED_ATTEMPTS_HEADER: str(login_limiter.count(keys[0]))})
     login_limiter.reset(f"email:{email}")
     return start_session(request, user)
 

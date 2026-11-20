@@ -22,7 +22,7 @@ from app.core import settings
 from app.db import storage
 ORDER = ("users", "properties", "accounts", "reels", "property_reels", "metric_snapshots", "oauth_states",
          "property_brokers", "invites", "api_keys", "link_history", "refreshes", "read_logs",
-         "idempotency_keys", "app_state", "profile_scans", "password_resets")
+         "idempotency_keys", "app_state", "profile_scans", "password_resets", "email_codes", "account_events")
 
 
 def main():
