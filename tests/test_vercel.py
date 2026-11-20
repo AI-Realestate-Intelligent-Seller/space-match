@@ -32,3 +32,13 @@ def test_vercel_defaults_base_url_and_turns_worker_off():
                            SESSION_SECRET="x", TOKEN_ENCRYPTION_KEY=Fernet.generate_key().decode())
     assert r.returncode == 0, r.stderr
     assert r.stdout.split() == ["https://hub.example.app", "False"]
+
+
+def test_pyproject_lists_the_same_dependencies_as_requirements():
+    """Vercel installs from pyproject.toml, Docker/Render from requirements.txt: both must list the app's packages."""
+    import tomllib
+    project = tomllib.loads((ROOT / "pyproject.toml").read_text())["project"]
+    declared = set(project["dependencies"]) | set(project["optional-dependencies"]["dev"])
+    required = {line.strip() for line in (ROOT / "requirements.txt").read_text().splitlines()
+                if line.strip() and not line.startswith("#")}
+    assert declared == required
